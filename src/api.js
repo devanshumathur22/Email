@@ -1,9 +1,14 @@
 export const api = async (url, options = {}) => {
-  const token = localStorage.getItem("token") // 🔥 JWT yahan se aayega
+  const token = localStorage.getItem("token")
 
   const res = await fetch(`http://localhost:8000${url}`, {
     method: options.method || "GET",
-    body: options.body,
+    body:
+      options.body instanceof FormData
+        ? options.body
+        : options.body
+        ? JSON.stringify(options.body)
+        : undefined,
     headers:
       options.body instanceof FormData
         ? {
@@ -22,8 +27,7 @@ export const api = async (url, options = {}) => {
       const data = await res.json()
       message = data.message || message
     } catch {
-      const text = await res.text()
-      message = text || message
+      message = await res.text()
     }
 
     throw new Error(message)

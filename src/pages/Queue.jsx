@@ -24,11 +24,11 @@ function QueuePreviewModal({ row, onClose }) {
         className="bg-white w-[700px] max-h-[80vh] overflow-y-auto rounded-xl p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-xl font-semibold mb-2">Email Preview</h2>
+        <h2 className="text-xl font-semibold mb-3">Email Preview</h2>
 
-        <div className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 mb-2">
           <b>To:</b> {row.email}
-        </div>
+        </p>
 
         <div className="border rounded p-3 mb-4">
           <b>Subject:</b> {row.subject || "—"}
@@ -36,17 +36,8 @@ function QueuePreviewModal({ row, onClose }) {
 
         <div
           className="prose max-w-none border rounded p-4"
-          dangerouslySetInnerHTML={{
-            __html: row.html || "",
-          }}
+          dangerouslySetInnerHTML={{ __html: row.html || "" }}
         />
-
-        {row.footer && (
-          <div
-            className="prose max-w-none border-t mt-4 pt-4 text-sm text-gray-500"
-            dangerouslySetInnerHTML={{ __html: row.footer }}
-          />
-        )}
 
         <div className="text-right mt-6">
           <Button text="Close" onClick={onClose} />
@@ -68,14 +59,15 @@ export default function Queue() {
   const fileRef = useRef(null)
   const navigate = useNavigate()
 
-  const normalizeStatus = (s) => s?.toUpperCase()
+  const normalize = (s) => s?.toUpperCase()
 
   /* ================= LOAD ================= */
   const load = async () => {
     try {
       const data = await api("/email-queue")
       setRows(Array.isArray(data) ? data : [])
-    } catch {
+    } catch (e) {
+      console.error(e)
       setRows([])
     }
   }
@@ -88,12 +80,14 @@ export default function Queue() {
   const filtered =
     filter === "all"
       ? rows
-      : rows.filter((r) => normalizeStatus(r.status) === filter)
+      : rows.filter((r) => normalize(r.status) === filter)
 
   /* ================= SELECTION ================= */
   const toggleRow = (id) => {
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id],
     )
   }
 
@@ -105,34 +99,46 @@ export default function Queue() {
     }
   }
 
-  const selectedRows = rows.filter((r) => selected.includes(r._id))
-  const hasInvalidSelection = selectedRows.some(
-    (r) =>
-      normalizeStatus(r.status) === "SENT" ||
-      normalizeStatus(r.status) === "FAILED"
+  const selectedRows = rows.filter((r) =>
+    selected.includes(r._id),
   )
 
-  /* ================= SUMMARY ================= */
-  const total = rows.length
-  const drafts = rows.filter(
-    (r) => normalizeStatus(r.status) === "DRAFT"
-  ).length
+  const hasInvalidSelection = selectedRows.some(
+    (r) =>
+      normalize(r.status) === "SENT" ||
+      normalize(r.status) === "FAILED" ||
+      normalize(r.status) === "CONVERTED",
+  )
 
   /* ================= ACTIONS ================= */
+
   const convertToCampaign = async () => {
-    if (!selected.length) return alert("Select rows first")
-    if (hasInvalidSelection)
-      return alert("Only Draft emails allowed")
+    if (!selected.length) {
+      alert("Select draft emails first")
+      return
+    }
 
-    await api("/email-queue/convert-to-campaign", {
-      method: "POST",
-      body: JSON.stringify({ queueIds: selected }),
-    })
+    if (hasInvalidSelection) {
+      alert("Only DRAFT emails can be converted")
+      return
+    }
 
-    alert("Campaign created 🚀")
-    setSelected([])
-    load()
-    navigate("/campaigns")
+    try {
+     await api("/campaigns/convert-to-campaign", {
+  method: "POST",
+  body: {
+    queueIds: selected,
+  },
+})
+
+
+      alert("Campaign created successfully 🚀")
+      setSelected([])
+      load()
+      navigate("/campaigns")
+    } catch (err) {
+      alert(err.message || "Conversion failed")
+    }
   }
 
   const uploadCSV = async (e) => {
@@ -183,28 +189,29 @@ export default function Queue() {
   /* ================= UI ================= */
   return (
     <div className="p-8 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold">Email Queue</h1>
+      <h1 className="text-2xl font-semibold">Email Queue</h1>
+
+      {/* FILTER + SUMMARY */}
+      <div className="flex gap-6 items-center text-sm">
+        <div>📦 Total: <b>{rows.length}</b></div>
+        <div>📝 Draft: <b>{rows.filter(r => normalize(r.status) === "DRAFT").length}</b></div>
+        <div>✅ Selected: <b>{selected.length}</b></div>
 
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="border px-3 py-2 rounded"
+          className="border px-3 py-2 rounded ml-auto"
         >
           <option value="all">All</option>
           <option value="DRAFT">Draft</option>
           <option value="SENT">Sent</option>
           <option value="FAILED">Failed</option>
+          <option value="CONVERTED">Converted</option>
         </select>
       </div>
 
-      <div className="flex gap-6 text-sm">
-        <div>📦 Total: <b>{total}</b></div>
-        <div>📝 Draft: <b>{drafts}</b></div>
-        <div>✅ Selected: <b>{selected.length}</b></div>
-      </div>
-
-      <div className="flex gap-3 flex-wrap items-center">
+      {/* ACTION BAR */}
+      <div className="flex gap-3 flex-wrap">
         <input
           ref={fileRef}
           type="file"
@@ -222,14 +229,17 @@ export default function Queue() {
           <option value="replace">Replace All</option>
         </select>
 
-        <Button text="Upload CSV" onClick={() => fileRef.current.click()} />
+        <Button
+          text="Upload CSV"
+          onClick={() => fileRef.current.click()}
+        />
 
         {selected.length > 0 && (
           <>
             <Button
               text="Convert to Campaign"
-              disabled={hasInvalidSelection}
               onClick={convertToCampaign}
+              disabled={hasInvalidSelection}
             />
             <Button
               variant="secondary"
@@ -240,6 +250,7 @@ export default function Queue() {
         )}
       </div>
 
+      {/* TABLE */}
       <div className="bg-white border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-100">
@@ -257,7 +268,6 @@ export default function Queue() {
               <th>Email</th>
               <th>Subject</th>
               <th>Status</th>
-              <th>Source</th>
               <th className="text-right">Actions</th>
             </tr>
           </thead>
@@ -268,10 +278,6 @@ export default function Queue() {
                 key={r._id}
                 row={r}
                 isSelected={selected.includes(r._id)}
-                isActive={
-                  previewRow?._id === r._id ||
-                  editingRow?._id === r._id
-                }
                 onSelect={toggleRow}
                 onPreview={() => setPreviewRow(r)}
                 onEdit={() => setEditingRow(r)}
@@ -282,6 +288,7 @@ export default function Queue() {
         </table>
       </div>
 
+      {/* MODALS */}
       {editingRow && (
         <EditQueueModal
           item={editingRow}

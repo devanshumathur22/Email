@@ -9,11 +9,10 @@ export class EmailService {
 
   constructor(private readonly usersService: UsersService) {}
 
-  // 🔑 Resolve SMTP dynamically per user
+  /* ================= SMTP RESOLUTION ================= */
   private async getTransporter(userId: string) {
     const user = await this.usersService.findById(userId)
 
-    // ✅ NULL + SMTP GUARD
     if (!user) {
       throw new BadRequestException("User not found")
     }
@@ -32,31 +31,35 @@ export class EmailService {
       },
     })
 
-    // 🔥 fail fast
     await transporter.verify()
-
     return { transporter, user }
   }
 
+  /* ================= SEND MAIL ================= */
   async sendMail(
     userId: string,
     to: string,
     subject: string,
     html: string,
+    footer?: string,
     campaignId?: string,
   ) {
     try {
       const { transporter, user } =
         await this.getTransporter(userId)
 
+      // 👁️ open tracking pixel (only for campaigns)
       const openPixel = campaignId
         ? `<img src="${process.env.BASE_URL}/email/open/${campaignId}" width="1" height="1" style="display:none" />`
         : ""
 
-      const finalHtml = `${html}${openPixel}`
+      const finalHtml = `
+        ${html}
+        ${footer || ""}
+        ${openPixel}
+      `
 
       const info = await transporter.sendMail({
-        // ✅ NON-NULL ASSERTION (TS ko satisfy karne ke liye)
         from: `"Email Sender" <${decrypt(user.smtp!.user)}>`,
         to,
         subject,
@@ -66,6 +69,7 @@ export class EmailService {
       this.logger.log(
         `📤 Email sent | user=${userId} | to=${to}`,
       )
+
       return info
     } catch (err) {
       this.logger.error("❌ Email send failed", err)

@@ -3,40 +3,55 @@ import { Document } from "mongoose"
 
 export type EmailQueueDocument = EmailQueue & Document
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: true,
+  strict: true,
+})
 export class EmailQueue {
-  // 🔥 SMTP OWNER / TENANT
-  @Prop({ required: true })
+  /* ===== OWNER ===== */
+  @Prop({ required: true, index: true })
   userId: string
 
-  // 📧 Receiver email
-  @Prop({ required: true })
+  /* ===== EMAIL ===== */
+  @Prop({ required: true, index: true })
   email: string
 
-  // 📨 Email subject
   @Prop()
   subject?: string
 
-  // 🧾 Email body
   @Prop()
   html?: string
 
-  // 🧩 Optional footer
   @Prop()
   footer?: string
 
-  // 📌 Campaign relation
-  @Prop()
+  /* ===== CAMPAIGN LINK ===== */
+  @Prop({ index: true })
   campaignId?: string
 
-  // 🔁 Queue status
+  /* ===== QUEUE STATUS ===== */
   @Prop({
+    type: String,
+    enum: [
+      "draft",       // manual queue (before convert/send)
+      "queued",      // waiting for cron
+      "processing",  // 🔒 locked by worker
+      "sent",
+      "failed",
+      "converted",   // moved into campaign
+    ],
     default: "draft",
-    enum: ["draft", "queued", "sent", "failed", "converted"],
+    index: true,
   })
-  status: "draft" | "queued" | "sent" | "failed" | "converted"
+  status:
+    | "draft"
+    | "queued"
+    | "processing"
+    | "sent"
+    | "failed"
+    | "converted"
 
-  // ⏱ Queue meta
+  /* ===== TIME ===== */
   @Prop()
   queuedAt?: Date
 
@@ -46,11 +61,11 @@ export class EmailQueue {
   @Prop()
   failedAt?: Date
 
-  // 🔄 Retry support
+  /* ===== RETRY ===== */
   @Prop({ default: 0 })
-  retryCount?: number
+  retryCount: number
 
-  // ❌ Error reason
+  /* ===== ERROR ===== */
   @Prop()
   lastError?: string
 }

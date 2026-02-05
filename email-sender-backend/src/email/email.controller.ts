@@ -16,8 +16,14 @@ import type { Response } from "express"
 
 import { JwtAuthGuard } from "../auth/jwt.guard"
 import { Unsubscribe, UnsubscribeDocument } from "./unsubscribe.schema"
-import { Campaign, CampaignDocument } from "../campaigns/campaign.schema"
+import {
+  Campaign,
+  CampaignDocument,
+  CampaignStatus,
+} from "../campaigns/campaign.schema"
 import { EmailService } from "./email.service"
+
+
 
 @UseGuards(JwtAuthGuard)
 @Controller(["email", "emails"])
@@ -32,18 +38,19 @@ export class EmailController {
     private readonly emailService: EmailService,
   ) {}
 
-  // ===============================
-  // 📤 DIRECT SEND (Compose → Send Now)
-  // ===============================
+  /* =====================================================
+     📤 DIRECT SEND (Compose → Send Now)
+  ===================================================== */
   @Post("send")
   async sendDirect(@Req() req, @Body() body: any) {
     const { email, subject, html } = body
 
-    if (!email) {
-      throw new BadRequestException("Email is required")
+    if (!email || !subject || !html) {
+      throw new BadRequestException(
+        "Email, subject and body required",
+      )
     }
 
-    // ✅ comma separated emails support
     const emails = email
       .split(",")
       .map((e: string) => e.trim())
@@ -55,7 +62,7 @@ export class EmailController {
 
     for (const to of emails) {
       await this.emailService.sendMail(
-        req.user.id,   // ✅ NOW SAFE
+        req.user.id,
         to,
         subject,
         html,
@@ -68,9 +75,98 @@ export class EmailController {
     }
   }
 
+  /* =====================================================
+     📝 SAVE DRAFT (Compose → Save Draft)
+  ===================================================== */
   // ===============================
-  // 🔕 UNSUBSCRIBE
-  // ===============================
+// 💾 SAVE DRAFT (Compose → Save Draft)
+// ===============================
+// ===============================
+// 📝 SAVE DRAFT (Compose → Save Draft)
+// ===============================
+// ===============================
+// 📝 SAVE DRAFT (Compose → Save Draft)
+// ===============================
+@Post("draft")
+async saveDraft(@Req() req, @Body() body: any) {
+  const { email, subject, html, footer } = body
+
+  if (!email || !subject || !html) {
+    throw new BadRequestException("Email, subject and body required")
+  }
+
+  const recipients = email
+    .split(",")
+    .map((e: string) => e.trim())
+    .filter(Boolean)
+
+  if (!recipients.length) {
+    throw new BadRequestException("No valid recipients")
+  }
+
+  const campaign = await this.campaignModel.create({
+    // ✅ REQUIRED FIELDS (SCHEMA MATCH)
+    name: subject,                  // 🔥 REQUIRED
+    subject,
+    html,
+    footer,
+
+    userId: req.user.id,             // 🔥 FIXED (userId, not user)
+    status: CampaignStatus.DRAFT,    // 🔥 IMPORTANT
+    source: "manual",
+
+    totalRecipients: recipients.length,
+    successCount: 0,
+    failureCount: 0,
+    queueCount: 0,
+  })
+
+  return {
+    message: "Draft saved successfully",
+    campaignId: campaign._id,
+  }
+}
+
+
+
+  /* =====================================================
+     ⏰ SCHEDULE EMAIL (Compose → Schedule)
+  ===================================================== */
+  @Post("schedule")
+  async schedule(@Req() req, @Body() body: any) {
+    const { email, subject, html, footer, scheduledAt } = body
+
+    if (!email || !subject || !html || !scheduledAt) {
+      throw new BadRequestException("Missing required fields")
+    }
+
+    const date = new Date(scheduledAt)
+    if (isNaN(date.getTime())) {
+      throw new BadRequestException("Invalid scheduled date")
+    }
+
+    const campaign = await this.campaignModel.create({
+      userId: req.user.id,
+      subject,
+      html,
+      footer,
+      scheduledAt: date,
+      source: "compose",
+      status: CampaignStatus.DRAFT,
+      paused: false,
+      totalRecipients: email.split(",").length,
+    })
+
+    return {
+      message: "Email scheduled",
+      campaignId: campaign._id,
+      scheduledAt: date,
+    }
+  }
+
+  /* =====================================================
+     🔕 UNSUBSCRIBE
+  ===================================================== */
   @Get("unsubscribe/:campaignId")
   async unsubscribe(
     @Param("campaignId") campaignId: string,
@@ -93,9 +189,9 @@ export class EmailController {
     `)
   }
 
-  // ===============================
-  // 🔗 CLICK TRACKING
-  // ===============================
+  /* =====================================================
+     🔗 CLICK TRACKING
+  ===================================================== */
   @Get("click/:campaignId")
   async trackClick(
     @Param("campaignId") campaignId: string,
@@ -113,9 +209,9 @@ export class EmailController {
     return res.redirect(url)
   }
 
-  // ===============================
-  // 👁️ OPEN TRACKING
-  // ===============================
+  /* =====================================================
+     👁️ OPEN TRACKING
+  ===================================================== */
   @Get("open/:campaignId")
   async trackOpen(
     @Param("campaignId") campaignId: string,
@@ -137,4 +233,6 @@ export class EmailController {
     res.setHeader("Content-Type", "image/gif")
     return res.send(pixel)
   }
+
+  
 }

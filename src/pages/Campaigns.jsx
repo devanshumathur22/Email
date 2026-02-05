@@ -4,89 +4,10 @@ import CampaignRow from "../components/CampaignRow"
 import ContactSelector from "../components/ContactSelector"
 import TemplatePicker from "../components/TemplatePicker"
 import CampaignAnalytics from "../components/CampaignAnalytics"
+import CampaignPreviewModal from "../components/CampaignPreviewModal"
+import CampaignScheduleModal from "../components/CampaignScheduleModal"
 
-/* ================= PREVIEW MODAL ================= */
-function CampaignPreviewModal({ campaign, onClose }) {
-  useEffect(() => {
-    const esc = (e) => e.key === "Escape" && onClose()
-    window.addEventListener("keydown", esc)
-    return () => window.removeEventListener("keydown", esc)
-  }, [onClose])
 
-  if (!campaign) return null
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-white w-[700px] max-h-[80vh] overflow-y-auto rounded-xl p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-xl font-semibold mb-4">Campaign Preview</h2>
-
-        <div className="mb-3 text-sm text-gray-600">
-          <b>Subject:</b> {campaign.subject || "—"}
-        </div>
-
-        <div
-          className="prose max-w-none border rounded p-4"
-          dangerouslySetInnerHTML={{
-            __html: campaign.html || "",
-          }}
-        />
-
-        <div className="text-right mt-6">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-100 rounded">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ================= SCHEDULE MODAL ================= */
-function CampaignScheduleModal({ campaign, onClose, onSave }) {
-  const [time, setTime] = useState("")
-
-  const submit = () => {
-    if (!time) {
-      alert("Select date & time")
-      return
-    }
-    onSave({ time })
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-white w-[420px] rounded-xl p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold mb-4">Schedule Campaign</h2>
-
-        <label className="text-sm">Send At</label>
-        <input
-          type="datetime-local"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-          className="w-full border px-3 py-2 rounded mb-6"
-        />
-
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-100 rounded">
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            className="px-4 py-2 bg-indigo-600 text-white rounded"
-          >
-            Schedule
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 /* ================= MAIN ================= */
 export default function Campaigns() {
@@ -102,29 +23,37 @@ export default function Campaigns() {
 
   const [showContacts, setShowContacts] = useState(false)
   const [selectedCampaign, setSelectedCampaign] = useState(null)
-
   const [scheduleCampaign, setScheduleCampaign] = useState(null)
 
   /* ================= LOAD ================= */
   const load = async () => {
-    try {
-      const data = await api("/campaigns")
-      setCampaigns(Array.isArray(data) ? data : [])
-    } catch {
-      setCampaigns([])
-    }
+    const data = await api("/campaigns")
+    setCampaigns(Array.isArray(data) ? data : [])
   }
 
   useEffect(() => {
     load()
-    const i = setInterval(load, 5000)
-    return () => clearInterval(i)
   }, [])
 
+  // 🔥 auto refresh ONLY when no modal is open
   useEffect(() => {
-    const esc = (e) => e.key === "Escape" && setOpenMenu(null)
-    window.addEventListener("keydown", esc)
-    return () => window.removeEventListener("keydown", esc)
+    if (
+      previewCampaign ||
+      analyticsCampaign ||
+      showContacts ||
+      scheduleCampaign
+    )
+      return
+
+    const i = setInterval(load, 5000)
+    return () => clearInterval(i)
+  }, [previewCampaign, analyticsCampaign, showContacts, scheduleCampaign])
+
+  // 🔥 outside click close menu
+  useEffect(() => {
+    const close = () => setOpenMenu(null)
+    window.addEventListener("click", close)
+    return () => window.removeEventListener("click", close)
   }, [])
 
   /* ================= ACTIONS ================= */
@@ -136,32 +65,26 @@ export default function Campaigns() {
     load()
   }
 
-const sendCampaign = async (campaign) => {
-  setOpenMenu(null)
+  const sendCampaign = async (campaign) => {
+    setOpenMenu(null)
 
-  // ✅ IF recipients already attached → DIRECT SEND
-  if (
-    campaign.recipientsSnapshot ||
-    campaign.totalRecipients > 0
-  ) {
-    await api(`/campaigns/${campaign._id}/send-now`, {
-      method: "POST",
-    })
+    const total =
+      campaign.totalRecipients || campaign.queueCount || 0
 
-    load()
-    return
+    if (total > 0) {
+      await api(`/campaigns/${campaign._id}/send-now`, {
+        method: "POST",
+      })
+      load()
+      return
+    }
+
+    // manual draft only
+    setSelectedCampaign(campaign._id)
+    setShowContacts(true)
   }
 
-  // ❌ ONLY manual + no recipients → open selector
-  setSelectedCampaign(campaign._id)
-  setShowContacts(true)
-}
-
-
-  // 🔥 CONTACT CONFIRM → SAVE + SEND
   const attachAndSend = async ({ contactIds, groupIds }) => {
-    if (!selectedCampaign) return
-
     await api(`/campaigns/${selectedCampaign}/recipients/save`, {
       method: "POST",
       body: JSON.stringify({
@@ -180,13 +103,12 @@ const sendCampaign = async (campaign) => {
     load()
   }
 
-  // 🔥 SCHEDULE
-  const saveSchedule = async ({ time }) => {
+ const saveSchedule = async ({ time }) => {
   await api(`/campaigns/${scheduleCampaign._id}/reschedule`, {
-    method: "POST",
-    body: JSON.stringify({
-      scheduledAt: new Date(time).toISOString(),
-    }),
+    method: "PATCH", // ✅ MUST BE PATCH
+    body: {
+      scheduledAt: new Date(time).toISOString(), // ✅ OBJECT
+    },
   })
 
   setScheduleCampaign(null)
@@ -196,8 +118,11 @@ const sendCampaign = async (campaign) => {
 
   /* ================= FILTER ================= */
   const filtered = campaigns.filter((c) => {
-    const matchText = c.subject?.toLowerCase().includes(search.toLowerCase())
-    const matchStatus = statusFilter === "all" || c.status === statusFilter
+    const matchText = c.subject
+      ?.toLowerCase()
+      .includes(search.toLowerCase())
+    const matchStatus =
+      statusFilter === "all" || c.status === statusFilter
     return matchText && matchStatus
   })
 
@@ -239,7 +164,7 @@ const sendCampaign = async (campaign) => {
       {/* TABLE */}
       <div className="bg-white border rounded-xl overflow-y-auto max-h-[70vh]">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 sticky top-0 z-10">
+          <thead className="bg-gray-50 sticky top-0">
             <tr>
               <th className="px-4 py-3 text-left">Subject</th>
               <th className="px-4 py-3">Status</th>
@@ -254,9 +179,9 @@ const sendCampaign = async (campaign) => {
               <CampaignRow
                 key={c._id}
                 campaign={c}
-                isOpen={openMenu === c._id}
-                onToggle={(id) =>
-                  setOpenMenu(openMenu === id ? null : id)
+                open={openMenu === c._id}
+                onToggle={() =>
+                  setOpenMenu(openMenu === c._id ? null : c._id)
                 }
                 onSend={() => sendCampaign(c)}
                 onDelete={() => deleteCampaign(c._id)}

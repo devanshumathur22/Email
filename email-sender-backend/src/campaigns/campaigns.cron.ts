@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common"
-import { Cron, CronExpression } from "@nestjs/schedule"
+import { Cron } from "@nestjs/schedule"
 import { InjectModel } from "@nestjs/mongoose"
 import { Model } from "mongoose"
 
@@ -20,61 +20,58 @@ export class CampaignsCron {
     private readonly campaignsService: CampaignsService,
   ) {}
 
-  /* ================= SCHEDULED CAMPAIGNS ================= */
-  // ⏰ Runs every 20 seconds → checks scheduled campaigns
-  @Cron("*/20 * * * * *")
-  async sendScheduledCampaigns() {
-    const now = new Date()
+ /* ================= SCHEDULED CAMPAIGNS ================= */
+// ⏰ every 20 seconds
+@Cron("*/20 * * * * *")
+async triggerScheduledCampaigns() {
+  const now = new Date()
 
-    const campaigns = await this.campaignModel.find({
-      status: CampaignStatus.PENDING,
-      paused: false,
-      scheduledAt: { $lte: now },
-    })
+  const campaigns = await this.campaignModel.find({
+    status: CampaignStatus.PENDING, // 🔥 FIXED
+    paused: false,
+    scheduledAt: { $lte: now },
+  })
 
-    if (!campaigns.length) return
+  if (!campaigns.length) return
 
-    for (const campaign of campaigns) {
-      try {
-        // 🔒 atomic lock (double send protection)
-        const locked = await this.campaignModel.updateOne(
-          {
-            _id: campaign._id,
-            status: CampaignStatus.PENDING,
-          },
-          {
-            status: CampaignStatus.SENDING,
-          },
-        )
+  for (const campaign of campaigns) {
+    try {
+      // 🔒 atomic lock
+      const locked = await this.campaignModel.updateOne(
+        {
+          _id: campaign._id,
+          status: CampaignStatus.PENDING,
+        },
+        {
+          status: CampaignStatus.SENDING,
+          sentAt: null,
+        },
+      )
 
-        if (locked.modifiedCount === 0) continue
+      if (locked.modifiedCount === 0) continue
 
-        this.logger.log(
-          `⏰ Triggering scheduled campaign ${campaign._id}`,
-        )
+      this.logger.log(
+        `⏰ Scheduled campaign started: ${campaign._id}`,
+      )
 
-        // 📤 enqueue emails (actual send handled by queue worker)
-        await this.campaignsService.sendCampaign(campaign)
-      } catch (err: any) {
-        await this.campaignModel.updateOne(
-          { _id: campaign._id },
-          {
-            status: CampaignStatus.FAILED,
-            failedAt: new Date(),
-            failedReason: err?.message,
-          },
-        )
+      await this.campaignsService.sendCampaign(campaign)
+    } catch (err: any) {
+      await this.campaignModel.updateOne(
+        { _id: campaign._id },
+        { status: CampaignStatus.FAILED },
+      )
 
-        this.logger.error(
-          `❌ Scheduled campaign failed ${campaign._id}`,
-          err,
-        )
-      }
+      this.logger.error(
+        `❌ Scheduled campaign failed ${campaign._id}`,
+        err,
+      )
     }
   }
+}
+
 
   /* ================= EMAIL QUEUE WORKER ================= */
-  // ⚡ FAST DEV MODE → every 20 seconds
+  // ⚡ every 20 seconds
   @Cron("*/20 * * * * *")
   async processQueue() {
     this.logger.log("📤 Processing email queue (20s)")

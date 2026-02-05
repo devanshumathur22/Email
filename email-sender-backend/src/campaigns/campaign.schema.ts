@@ -5,15 +5,18 @@ export type CampaignDocument = Campaign & Document
 
 export enum CampaignStatus {
   DRAFT = "draft",
-  PENDING = "pending",
+   PENDING = "pending", 
   SENDING = "sending",
   SENT = "sent",
   FAILED = "failed",
 }
 
-@Schema({ timestamps: true })
+@Schema({
+  timestamps: true,
+  strict: true, // 🔒 important – unknown fields block
+})
 export class Campaign {
-  /* ================= BASIC ================= */
+  /* ===== BASIC ===== */
   @Prop({ required: true })
   name: string
 
@@ -26,112 +29,50 @@ export class Campaign {
   @Prop()
   footer?: string
 
-  /* ================= STATUS ================= */
+  /* ===== OWNER ===== */
+  @Prop({ required: true, index: true })
+  userId: string
+
+  /* ===== STATUS ===== */
   @Prop({
     type: String,
     enum: Object.values(CampaignStatus),
     default: CampaignStatus.DRAFT,
+    index: true,
   })
   status: CampaignStatus
 
-  @Prop({ default: false })
+  @Prop({ default: false, index: true })
   paused: boolean
 
-  /* ================= SCHEDULER ================= */
-  @Prop({ type: Date })
-  scheduledAt?: Date
-
+  /* ===== SOURCE ===== */
   @Prop({
     type: String,
-    enum: ["one-time", "daily", "weekly"],
-    default: "one-time",
+    enum: ["manual", "queue"],
+    default: "manual",
+    index: true,
   })
-  scheduleType: string
+  source: "manual" | "queue"
 
-  @Prop({ required: true })
-userId: string
-
-
-  @Prop({ default: "Asia/Kolkata" })
-  timezone?: string
-
-  /* ================= STATS ================= */
+  /* ===== COUNTS ===== */
   @Prop({ default: 0 })
-  totalRecipients: number
+  totalRecipients: number   // total emails in campaign
 
   @Prop({ default: 0 })
-  successCount: number
+  successCount: number      // sent successfully
 
   @Prop({ default: 0 })
-  failureCount: number
+  failureCount: number      // failed sends
 
   @Prop({ default: 0 })
-  openCount: number
+  queueCount: number        // 🔥 how many came from queue
 
-  @Prop({ default: 0 })
-  clickCount: number
-
-  /* ================= FINAL ================= */
-  @Prop({ type: Date })
-  sentAt?: Date
-
-  @Prop({ type: Date })
-  failedAt?: Date
-
-  @Prop({ type: Date })
-  lastOpenedAt?: Date
+  /* ===== TIME ===== */
+  @Prop()
+  scheduledAt?: Date
 
   @Prop()
-  failedReason?: string
-
-  @Prop({ default: false })
-  deleted: boolean
-
-  @Prop({ type: Date })
-  deletedAt?: Date
-
-  @Prop({ type: Date })
-  totalRecipientsCalculatedAt?: Date
-
-  @Prop({ type: Date }) 
-  sentcountUpdatedAt?: Date 
-
-  @Prop({ type: Date }) 
-  failurecountUpdatedAt?: Date
-
-  @Prop({ type: Date })
-  sentCount: number
-
- @Prop({
-  type: String,
-  enum: ["manual", "queue"],
-  default: "manual",
-})
-source: "manual" | "queue"
-
-
-
-  /* ================= SNAPSHOT ================= */
-  @Prop({
-    type: {
-      contactIds: [{ type: String }],
-      groupIds: [{ type: String }],
-      excludeContactIds: [{ type: String }],
-      savedAt: Date,
-    },
-    default: {
-      contactIds: [],
-      groupIds: [],
-      excludeContactIds: [],
-      savedAt: null,
-    },
-  })
-  recipientsSnapshot: {
-    contactIds: string[]
-    groupIds: string[]
-    excludeContactIds: string[]
-    savedAt: Date
-  }
+  sentAt?: Date
 }
 
 export const CampaignSchema =

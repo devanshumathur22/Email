@@ -20,24 +20,26 @@ import { EmailQueueService } from "./email-queue.service"
 @UseGuards(JwtAuthGuard)
 @Controller("email-queue")
 export class EmailQueueController {
-  constructor(private readonly queueService: EmailQueueService) {}
+  constructor(
+    private readonly queueService: EmailQueueService,
+  ) {}
 
   /* ================= LIST ================= */
   @Get()
-  findAll(@Req() req) {
+  async findAll(@Req() req) {
     return this.queueService.findAll(req.user.id)
   }
 
   /* ================= COUNT ================= */
   @Get("count")
-  count(@Req() req) {
+  async count(@Req() req) {
     return this.queueService.count(req.user.id)
   }
 
   /* ================= CSV UPLOAD ================= */
   @Post("upload")
   @UseInterceptors(FileInterceptor("file"))
-  uploadCSV(
+  async uploadCSV(
     @Req() req,
     @UploadedFile() file: Express.Multer.File,
     @Query("mode") mode: "append" | "replace" = "append",
@@ -55,42 +57,69 @@ export class EmailQueueController {
 
   /* ================= UPDATE ================= */
   @Patch(":id")
-  update(
+  async update(
     @Req() req,
     @Param("id") id: string,
-    @Body() body: any,
+    @Body() body: {
+      subject?: string
+      html?: string
+      footer?: string
+    },
   ) {
-    return this.queueService.update(req.user.id, id, body)
+    return this.queueService.update(
+      req.user.id,
+      id,
+      body,
+    )
   }
 
   /* ================= QUEUE → CAMPAIGN ================= */
   @Post("convert-to-campaign")
-  convert(
+  async convertToCampaign(
     @Req() req,
-    @Body("queueIds") ids: string[],
+    @Body("queueIds") queueIds: string[],
   ) {
-    if (!ids || !ids.length) {
-      throw new BadRequestException("queueIds required")
+    if (!Array.isArray(queueIds) || !queueIds.length) {
+      throw new BadRequestException("No emails selected")
     }
 
-    return this.queueService.convertToCampaign(req.user.id, ids)
+    return this.queueService.convertToCampaign(
+      req.user.id,
+      queueIds,
+    )
   }
 
   /* ================= DELETE ONE ================= */
   @Delete(":id")
-  deleteOne(@Req() req, @Param("id") id: string) {
-    return this.queueService.deleteOne(req.user.id, id)
+  async deleteOne(
+    @Req() req,
+    @Param("id") id: string,
+  ) {
+    return this.queueService.deleteOne(
+      req.user.id,
+      id,
+    )
   }
 
   /* ================= DELETE MANY ================= */
   @Post("delete-many")
-  deleteMany(@Req() req, @Body("ids") ids: string[]) {
-    return this.queueService.deleteMany(req.user.id, ids)
+  async deleteMany(
+    @Req() req,
+    @Body("ids") ids: string[],
+  ) {
+    if (!Array.isArray(ids) || !ids.length) {
+      throw new BadRequestException("No ids provided")
+    }
+
+    return this.queueService.deleteMany(
+      req.user.id,
+      ids,
+    )
   }
 
   /* ================= DELETE ALL ================= */
   @Delete()
-  deleteAll(@Req() req) {
+  async deleteAll(@Req() req) {
     return this.queueService.deleteAll(req.user.id)
   }
 }

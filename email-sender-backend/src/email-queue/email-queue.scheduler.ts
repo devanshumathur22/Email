@@ -19,27 +19,27 @@ export class EmailQueueScheduler {
     private readonly emailService: EmailService,
   ) {}
 
-  // runs every 1 minute
+  // ⏱ runs every 1 minute
   @Cron("*/1 * * * *")
   async processScheduledQueue() {
     const items = await this.queueModel.find({
-      status: "queued", // ✅ correct status
+      status: "queued",
     })
 
     if (!items.length) return
 
     for (const item of items) {
       try {
-        // 🔒 soft lock
+        // 🔒 HARD LOCK (very important)
         const lock = await this.queueModel.updateOne(
           { _id: item._id, status: "queued" },
-          { $set: { status: showSending() } },
+          { $set: { status: "processing" } },
         )
 
         if (lock.modifiedCount === 0) continue
 
         await this.emailService.sendMail(
-          item.userId,                    // ✅ REQUIRED
+          item.userId,
           item.email,
           item.subject || "(No Subject)",
           item.html || "",
@@ -59,17 +59,15 @@ export class EmailQueueScheduler {
           {
             status: "failed",
             failedAt: new Date(),
-            lastError: err?.message,
+            lastError: err?.message || "Send failed",
           },
+        )
+
+        this.logger.error(
+          `❌ Queue send failed ${item.email}`,
+          err,
         )
       }
     }
   }
-}
-
-/**
- * helper to avoid TS enum widening issues
- */
-function showSending(): "queued" {
-  return "queued"
 }

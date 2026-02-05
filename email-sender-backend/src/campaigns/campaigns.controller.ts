@@ -4,6 +4,7 @@ import {
   Post,
   Get,
   Param,
+  Patch,
   Query,
   Res,
   Delete,
@@ -15,7 +16,11 @@ import { InjectModel } from "@nestjs/mongoose"
 import { Model } from "mongoose"
 import type { Response } from "express"
 
-import { Campaign, CampaignDocument } from "./campaign.schema"
+import {
+  Campaign,
+  CampaignDocument,
+  CampaignStatus,
+} from "./campaign.schema"
 import {
   CampaignRecipient,
   CampaignRecipientDocument,
@@ -25,7 +30,7 @@ import { EmailQueueService } from "../email-queue/email-queue.service"
 import { JwtAuthGuard } from "../auth/jwt.guard"
 
 @Controller("campaigns")
-@UseGuards(JwtAuthGuard) // 🔥 ALL PRIVATE ROUTES PROTECTED
+@UseGuards(JwtAuthGuard)
 export class CampaignsController {
   constructor(
     @InjectModel(Campaign.name)
@@ -38,7 +43,8 @@ export class CampaignsController {
     private readonly campaignsService: CampaignsService,
   ) {}
 
-  /* ================= PUBLIC TRACKING ================= */
+  /* ================= TRACKING ================= */
+
   @Get("email/open/:campaignId")
   async trackOpen(
     @Param("campaignId") campaignId: string,
@@ -66,6 +72,7 @@ export class CampaignsController {
   }
 
   /* ================= CREATE ================= */
+
   @Post()
   async create(@Req() req, @Body() body: any) {
     if (!body.subject || !body.html) {
@@ -84,48 +91,146 @@ export class CampaignsController {
   }
 
   /* ================= SEND NOW ================= */
+
   @Post(":id/send-now")
   async sendNow(@Req() req, @Param("id") id: string) {
     const campaign = await this.campaignModel.findOne({
       _id: id,
       userId: req.user.id,
+      status: CampaignStatus.DRAFT,
     })
 
     if (!campaign) {
-      throw new BadRequestException("Campaign not found")
-    }
-
-    await this.campaignsService.sendCampaign(campaign)
-    return { message: "Campaign queued" }
-  }
-
-  /* ================= SCHEDULE ================= */
-  @Post(":id/schedule")
-  async schedule(
-    @Req() req,
-    @Param("id") id: string,
-    @Body("scheduledAt") scheduledAt: string,
-  ) {
-    const date = new Date(scheduledAt)
-    if (isNaN(date.getTime())) {
-      throw new BadRequestException("Invalid date")
+      throw new BadRequestException("Campaign not sendable")
     }
 
     await this.campaignModel.updateOne(
-      { _id: id, userId: req.user.id },
+      { _id: id },
       {
-        status: "pending",
-        scheduledAt: date,
+        status: CampaignStatus.SENDING,
+        paused: false,
         sentAt: null,
-        successCount: 0,
-        failureCount: 0,
       },
     )
 
-    return { message: "Campaign scheduled" }
+    await this.campaignsService.sendCampaign(campaign)
+
+    return { message: "Campaign sending started" }
+  }
+
+  /* ================= PAUSE / RESUME ================= */
+
+  @Post(":id/pause")
+  async pause(@Req() req, @Param("id") id: string) {
+    const result = await this.campaignModel.updateOne(
+      {
+        _id: id,
+        userId: req.user.id,
+        status: CampaignStatus.SENDING,
+      },
+      { paused: true },
+    )
+
+    if (!result.modifiedCount) {
+      throw new BadRequestException("Campaign not pausable")
+    }
+
+    return { message: "Campaign paused" }
+  }
+
+  @Post(":id/resume")
+  async resume(@Req() req, @Param("id") id: string) {
+    const result = await this.campaignModel.updateOne(
+      {
+        _id: id,
+        userId: req.user.id,
+        paused: true,
+      },
+      {
+        paused: false,
+        status: CampaignStatus.SENDING,
+      },
+    )
+
+    if (!result.modifiedCount) {
+      throw new BadRequestException("Campaign not resumable")
+    }
+
+    return { message: "Campaign resumed" }
+  }
+
+  /* ================= SCHEDULE ================= */
+
+  /* ================= SCHEDULE / RESCHEDULE ================= */
+
+@Post(":id/schedule")
+async schedule(
+  @Req() req,
+  @Param("id") id: string,
+  @Body("scheduledAt") scheduledAt: string,
+) {
+  const date = new Date(scheduledAt)
+
+  if (!scheduledAt || isNaN(date.getTime())) {
+    throw new BadRequestException("Invalid scheduled date")
+  }
+
+  await this.campaignModel.updateOne(
+    { _id: id, userId: req.user.id },
+    {
+      status: CampaignStatus.PENDING,
+      scheduledAt: date,
+      paused: false,
+    },
+  )
+
+  return {
+    message: "Campaign scheduled",
+    scheduledAt: date,
+  }
+}
+
+  /* ================= RESCHEDULE ================= */
+
+  @Patch(":id/reschedule")
+async reschedule(
+  @Req() req,
+  @Param("id") id: string,
+  @Body("scheduledAt") scheduledAt: string,
+) {
+  const date = new Date(scheduledAt)
+
+  if (!scheduledAt || isNaN(date.getTime())) {
+    throw new BadRequestException("Invalid date")
+  }
+
+  await this.campaignModel.updateOne(
+    { _id: id, userId: req.user.id },
+    {
+      status: CampaignStatus.PENDING,
+      scheduledAt: date,
+      paused: false,
+    },
+  )
+
+  return {
+    message: "Campaign rescheduled",
+    scheduledAt: date,
+  }
+}
+
+  /* ================= RETRY FAILED ================= */
+
+  @Post(":id/retry-failed")
+  retryFailed(@Req() req, @Param("id") id: string) {
+    return this.campaignsService.retryFailedRecipients(
+      id,
+      req.user.id,
+    )
   }
 
   /* ================= LIST ================= */
+
   @Get()
   getAll(@Req() req) {
     return this.campaignModel
@@ -134,6 +239,7 @@ export class CampaignsController {
   }
 
   /* ================= ANALYTICS ================= */
+
   @Get(":id/analytics/summary")
   analytics(@Req() req, @Param("id") id: string) {
     return this.campaignsService.getCampaignAnalyticsSummary(
@@ -142,15 +248,8 @@ export class CampaignsController {
     )
   }
 
-  @Post(":id/retry-failed")
-  retry(@Req() req, @Param("id") id: string) {
-    return this.campaignsService.retryFailedRecipients(
-      id,
-      req.user.id,
-    )
-  }
-
   /* ================= DELETE ================= */
+
   @Delete(":id")
   async delete(@Req() req, @Param("id") id: string) {
     await this.campaignModel.deleteOne({
@@ -166,6 +265,7 @@ export class CampaignsController {
   }
 
   /* ================= QUEUE → CAMPAIGN ================= */
+
   @Post("convert-to-campaign")
   convertToCampaign(
     @Req() req,
@@ -177,9 +277,10 @@ export class CampaignsController {
     )
   }
 
-  /* ================= DASHBOARD STATS ================= */
+  /* ================= DASHBOARD ================= */
+
   @Get("stats/dashboard")
-  async dashboardStats(@Req() req) {
+  dashboardStats(@Req() req) {
     return this.campaignsService.dashboardStats(req.user.id)
   }
 }

@@ -3,6 +3,7 @@ import {
   Inject,
   forwardRef,
   BadRequestException,
+  Logger,
 } from "@nestjs/common"
 import { InjectModel } from "@nestjs/mongoose"
 import { Model } from "mongoose"
@@ -10,31 +11,29 @@ import csv from "csvtojson"
 
 import { EmailQueue, EmailQueueDocument } from "./email-queue.schema"
 import { CampaignsService } from "../campaigns/campaigns.service"
-import { EmailService } from "../email/email.service"
 
 @Injectable()
 export class EmailQueueService {
+  private readonly logger = new Logger(EmailQueueService.name)
+
   constructor(
     @InjectModel(EmailQueue.name)
     private readonly model: Model<EmailQueueDocument>,
-
-    private readonly emailService: EmailService,
 
     @Inject(forwardRef(() => CampaignsService))
     private readonly campaigns: CampaignsService,
   ) {}
 
-  // ================= GET ALL =================
+  /* ================= LIST ================= */
   async findAll(userId: string) {
     return this.model.find({ userId }).sort({ createdAt: -1 })
   }
 
-  // ================= COUNT =================
   async count(userId: string) {
     return this.model.countDocuments({ userId })
   }
 
-  // ================= CSV UPLOAD =================
+  /* ================= CSV UPLOAD ================= */
   async processCSV(
     userId: string,
     file: Express.Multer.File,
@@ -46,16 +45,16 @@ export class EmailQueueService {
       await this.model.deleteMany({ userId })
     }
 
-    const emailsFromCSV = rows
+    const emails = rows
       .filter(r => r.email)
       .map(r => r.email.trim().toLowerCase())
 
     const existing = await this.model.find(
-      { userId, email: { $in: emailsFromCSV } },
+      { userId, email: { $in: emails } },
       { email: 1 },
     )
 
-    const existingEmails = new Set(
+    const existingSet = new Set(
       existing.map(e => e.email.toLowerCase()),
     )
 
@@ -63,15 +62,15 @@ export class EmailQueueService {
       .filter(
         r =>
           r.email &&
-          !existingEmails.has(r.email.trim().toLowerCase()),
+          !existingSet.has(r.email.trim().toLowerCase()),
       )
       .map(r => ({
         userId,
-        email: r.email.trim(),
+        email: r.email.trim().toLowerCase(),
         subject: r.subject || "",
         html: r.body_html || "<p>Hello</p>",
         footer: r.footer || "",
-        status: "draft",
+        status: "draft", // 🔥 ONLY draft here
       }))
 
     if (docs.length) {
@@ -79,27 +78,31 @@ export class EmailQueueService {
     }
 
     return {
-      mode,
-      totalCsv: emailsFromCSV.length,
+      totalCsv: emails.length,
       added: docs.length,
-      skipped: emailsFromCSV.length - docs.length,
+      skipped: emails.length - docs.length,
     }
   }
 
-  // ================= UPDATE ONE =================
+  /* ================= UPDATE ONE ================= */
   async update(userId: string, id: string, data: any) {
     return this.model.findOneAndUpdate(
-      { _id: id, userId },
+      { _id: id, userId, status: "draft" }, // 🔒 editable only in draft
       data,
       { new: true },
     )
   }
 
-  // ================= CONVERT TO CAMPAIGN =================
+  /* ================= CONVERT QUEUE → CAMPAIGN ================= */
   async convertToCampaign(userId: string, ids: string[]) {
+    if (!ids?.length) {
+      throw new BadRequestException("No emails selected")
+    }
+
     const rows = await this.model.find({
       _id: { $in: ids },
       userId,
+      status: "draft",
     })
 
     if (!rows.length) {
@@ -113,72 +116,54 @@ export class EmailQueueService {
       name: `Queue Campaign ${Date.now()}`,
       subject,
       html,
-      userId, // 🔥 OWNER
+      userId,
+      source: "queue",
+      queueCount: rows.length,
     })
 
+    // ✅ attach recipients to campaign
     await this.campaigns.attachRecipients(
       campaign._id.toString(),
       rows.map(r => r.email),
     )
 
-    await this.model.deleteMany({
-      _id: { $in: ids },
-      userId,
-    })
+    // ✅ mark queue rows as converted (audit safe)
+    await this.model.updateMany(
+      { _id: { $in: ids }, userId },
+      {
+        status: "converted",
+        campaignId: campaign._id.toString(),
+      },
+    )
 
     return {
       message: "Queue converted to campaign",
-      campaignId: campaign._id,
+      campaignId: campaign._id.toString(),
       count: rows.length,
     }
   }
 
-  // ================= SEND QUEUE DIRECTLY =================
-  async sendQueueDirectly(userId: string) {
-    const queue = await this.model.find({
-      userId,
-      status: "draft",
-    })
-
-    for (const job of queue) {
-      try {
-        await this.emailService.sendMail(
-          job.userId,        // 🔥 SMTP owner
-          job.email,
-          job.subject || "",
-          job.html || "",
-        )
-
-        await this.model.updateOne(
-          { _id: job._id },
-          { status: "sent", sentAt: new Date() },
-        )
-      } catch (err: any) {
-        await this.model.updateOne(
-          { _id: job._id },
-          { status: "failed", lastError: err.message },
-        )
-      }
-    }
-
-    return { sent: queue.length }
-  }
-
-  // ================= DELETE ONE =================
+  /* ================= DELETE ================= */
   async deleteOne(userId: string, id: string) {
-    return this.model.deleteOne({ _id: id, userId })
+    return this.model.deleteOne({
+      _id: id,
+      userId,
+      status: "draft", // 🔒 only draft deletable
+    })
   }
 
-  // ================= DELETE MANY =================
   async deleteMany(userId: string, ids: string[]) {
     return this.model.deleteMany({
       _id: { $in: ids },
       userId,
+      status: "draft",
     })
   }
 
-  // ================= DELETE ALL =================
   async deleteAll(userId: string) {
-    return this.model.deleteMany({ userId })
+    return this.model.deleteMany({
+      userId,
+      status: "draft",
+    })
   }
 }

@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  
 } from "@nestjs/common"
 import { InjectModel } from "@nestjs/mongoose"
 import { Model } from "mongoose"
@@ -12,8 +13,6 @@ import {
   CampaignRecipientDocument,
 } from "./campaign-recipient.schema"
 import { EmailService } from "../email/email.service"
-import { Contact, ContactDocument } from "../contacts/contact.schema"
-import { Group, GroupDocument } from "../group/groups.schema"
 import { EmailQueue, EmailQueueDocument } from "../email-queue/email-queue.schema"
 
 @Injectable()
@@ -24,14 +23,8 @@ export class CampaignsService {
     @InjectModel(Campaign.name)
     private readonly campaignModel: Model<CampaignDocument>,
 
-    @InjectModel(Contact.name)
-    private readonly contactModel: Model<ContactDocument>,
-
     @InjectModel(CampaignRecipient.name)
     private readonly recipientModel: Model<CampaignRecipientDocument>,
-
-    @InjectModel(Group.name)
-    private readonly groupModel: Model<GroupDocument>,
 
     @InjectModel(EmailQueue.name)
     private readonly emailQueueModel: Model<EmailQueueDocument>,
@@ -45,15 +38,23 @@ export class CampaignsService {
     subject: string
     html: string
     footer?: string
-    userId: string          // ✅ ADD: campaign owner
+    userId: string
+    source?: "manual" | "queue"
+    queueCount?: number
   }) {
     return this.campaignModel.create({
-      ...data,
+      name: data.name,
+      subject: data.subject,
+      html: data.html,
+      footer: data.footer,
+      userId: data.userId,
+      source: data.source ?? "manual",
+      queueCount: data.queueCount ?? 0,
       status: "draft",
-      source: "manual",
+      paused: false,
+      totalRecipients: data.queueCount ?? 0,
       successCount: 0,
       failureCount: 0,
-      paused: false,
     })
   }
 
@@ -70,6 +71,11 @@ export class CampaignsService {
         status: "pending",
       })),
     )
+
+    await this.campaignModel.updateOne(
+      { _id: campaignId },
+      { totalRecipients: emails.length },
+    )
   }
 
   /* ================= QUEUE → CAMPAIGN ================= */
@@ -80,32 +86,26 @@ export class CampaignsService {
 
     const items = await this.emailQueueModel.find({
       _id: { $in: queueIds },
-      userId,                       // ✅ ADD: user isolation
-      status: { $ne: "failed" },
+      userId,
+      status: "draft",
     })
 
     if (!items.length) {
-      throw new BadRequestException("No valid queue emails")
+      throw new BadRequestException("Queue empty")
     }
 
-    const campaign = await this.campaignModel.create({
+    const campaign = await this.create({
       name: items[0].subject || "Queue Campaign",
       subject: items[0].subject || "",
       html: items[0].html || "",
-      status: "draft",
+      userId,
       source: "queue",
-      successCount: 0,
-      failureCount: 0,
-      paused: false,
-      userId,                      // ✅ ADD
+      queueCount: items.length,
     })
 
-    await this.recipientModel.insertMany(
-      items.map((i) => ({
-        campaignId: campaign._id.toString(),
-        email: i.email,
-        status: "pending",
-      })),
+    await this.attachRecipients(
+      campaign._id.toString(),
+      items.map((i) => i.email),
     )
 
     await this.emailQueueModel.updateMany(
@@ -117,8 +117,9 @@ export class CampaignsService {
     )
 
     return {
-      message: "Converted to campaign",
-      campaignId: campaign._id,
+      message: "Queue converted to campaign",
+      campaignId: campaign._id.toString(),
+      count: items.length,
     }
   }
 
@@ -137,16 +138,12 @@ export class CampaignsService {
 
     await this.campaignModel.updateOne(
       { _id: campaign._id },
-      {
-        status: "sending",
-        sentAt: null,
-        totalRecipients: recipients.length,
-      },
+      { status: "sending", sentAt: null },
     )
 
     await this.emailQueueModel.insertMany(
       recipients.map((r) => ({
-        userId: campaign.userId,        // ✅ ADD: SMTP owner
+        userId: campaign.userId,
         campaignId: campaign._id.toString(),
         email: r.email,
         subject: campaign.subject,
@@ -160,90 +157,136 @@ export class CampaignsService {
 
   /* ================= PROCESS EMAIL QUEUE ================= */
   async processEmailQueue() {
-    const queue = await this.emailQueueModel.find({
-      status: "queued",
-    })
+  // 🔒 pick small batch
+  const jobs = await this.emailQueueModel
+    .find({ status: "queued" })
+    .limit(10)
 
-    for (const job of queue) {
-      try {
-        await this.emailService.sendMail(
-          job.userId,                   // ✅ ADD
-          job.email,
-          job.subject || "(No Subject)",
-          job.html || "",
-          job.campaignId,
-        )
+  for (const job of jobs) {
+    // 🔐 atomic soft-lock (prevents double send)
+    const locked = await this.emailQueueModel.updateOne(
+      { _id: job._id, status: "queued" },
+      { $set: { status: "processing" } },
+    )
 
-        await this.emailQueueModel.updateOne(
+    if (locked.modifiedCount === 0) continue
+
+    const campaign = await this.campaignModel.findById(job.campaignId)
+    if (!campaign || campaign.paused) continue
+
+    try {
+      await this.emailService.sendMail(
+        job.userId,
+        job.email,
+        job.subject || "(No Subject)",
+        job.html || "",
+        job.campaignId,
+      )
+
+      await Promise.all([
+        this.emailQueueModel.updateOne(
           { _id: job._id },
-          { status: "sent", sentAt: new Date() },
-        )
-
-        await this.recipientModel.updateOne(
+          {
+            status: "sent",
+            sentAt: new Date(),
+            lastError: null,
+          },
+        ),
+        this.recipientModel.updateOne(
           { campaignId: job.campaignId, email: job.email },
           { status: "sent", sentAt: new Date() },
-        )
-
-        await this.campaignModel.updateOne(
+        ),
+        this.campaignModel.updateOne(
           { _id: job.campaignId },
           { $inc: { successCount: 1 } },
-        )
-      } catch (err: any) {
-        await this.emailQueueModel.updateOne(
+        ),
+      ])
+    } catch (err: any) {
+      await Promise.all([
+        this.emailQueueModel.updateOne(
           { _id: job._id },
           {
             status: "failed",
-            lastError: err.message,
             failedAt: new Date(),
+            lastError: err?.message,
           },
-        )
-
-        await this.recipientModel.updateOne(
+        ),
+        this.recipientModel.updateOne(
           { campaignId: job.campaignId, email: job.email },
           {
             status: "failed",
-            failedReason: err.message,
+            failedReason: err?.message,
           },
-        )
-
-        await this.campaignModel.updateOne(
+        ),
+        this.campaignModel.updateOne(
           { _id: job.campaignId },
           { $inc: { failureCount: 1 } },
-        )
-      }
-    }
-
-    /* ================= FINAL STATUS ================= */
-    const campaigns = await this.campaignModel.find({
-      status: "sending",
-    })
-
-    for (const c of campaigns) {
-      const pendingQueue = await this.emailQueueModel.countDocuments({
-        campaignId: c._id.toString(),
-        status: "queued",
-      })
-
-      const totalProcessed =
-        (c.successCount || 0) + (c.failureCount || 0)
-
-      if (pendingQueue === 0 && totalProcessed > 0) {
-        await this.campaignModel.updateOne(
-          { _id: c._id },
-          {
-            status: c.failureCount > 0 ? "failed" : "sent",
-            sentAt: new Date(),
-          },
-        )
-      }
+        ),
+      ])
     }
   }
 
+  /* ================= FINALIZE CAMPAIGNS ================= */
+  const sending = await this.campaignModel.find({ status: "sending" })
+
+  for (const c of sending) {
+    const pending = await this.emailQueueModel.countDocuments({
+      campaignId: c._id.toString(),
+      status: { $in: ["queued", "processing"] },
+    })
+
+    if (pending === 0 && c.status === "sending") {
+      await this.campaignModel.updateOne(
+        { _id: c._id },
+        {
+          status: "sent",
+          sentAt: new Date(),
+          paused: false,
+        },
+      )
+    }
+  }
+}
+
+// Retry 
+async rescheduleCampaign(
+  campaignId: string,
+  userId: string,
+  scheduledAt: Date,
+) {
+  const campaign = await this.campaignModel.findOne({
+    _id: campaignId,
+    userId,
+  })
+
+  if (!campaign) {
+    throw new BadRequestException("Campaign not found")
+  }
+
+  if (campaign.status !== "draft") {
+    throw new BadRequestException(
+      "Only draft campaigns can be scheduled",
+    )
+  }
+
+  await this.campaignModel.updateOne(
+    { _id: campaignId },
+    {
+      scheduledAt: new Date(scheduledAt),
+      status: "pending",
+      paused: false,
+    },
+  )
+
+  return { message: "Campaign scheduled successfully" }
+}
+
+
+
+
+
   /* ================= RETRY FAILED ================= */
-  async retryFailedRecipients(
-    campaignId: string,
-    userId: string,              // ✅ ADD
-  ) {
+  async retryFailedRecipients(campaignId: string, userId: string) {
     const failed = await this.recipientModel.find({
       campaignId,
       status: "failed",
@@ -255,7 +298,7 @@ export class CampaignsService {
 
     const campaign = await this.campaignModel.findOne({
       _id: campaignId,
-      userId,                    // ✅ ADD
+      userId,
     })
 
     if (!campaign) {
@@ -269,30 +312,27 @@ export class CampaignsService {
 
     await this.emailQueueModel.insertMany(
       failed.map((r) => ({
-        userId,                  // ✅ ADD
+        userId,
         campaignId,
         email: r.email,
         subject: campaign.subject,
         html: campaign.html,
         status: "queued",
-        retryCount: 0,
+        retryCount: 1,
         queuedAt: new Date(),
       })),
     )
 
     await this.campaignModel.updateOne(
       { _id: campaignId },
-      { status: "sending" },
+      { status: "sending", paused: false },
     )
 
     return { message: "Retry started", count: failed.length }
   }
 
   /* ================= ANALYTICS ================= */
-  async getCampaignAnalyticsSummary(
-    campaignId: string,
-    userId: string,              // ✅ ADD
-  ) {
+  async getCampaignAnalyticsSummary(campaignId: string, userId: string) {
     const campaign = await this.campaignModel.findOne({
       _id: campaignId,
       userId,
@@ -302,23 +342,14 @@ export class CampaignsService {
       throw new BadRequestException("Campaign not found")
     }
 
-    const total = await this.recipientModel.countDocuments({ campaignId })
-    const sent = await this.recipientModel.countDocuments({
-      campaignId,
-      status: "sent",
-    })
-    const failed = await this.recipientModel.countDocuments({
-      campaignId,
-      status: "failed",
-    })
-
     return {
-      total,
-      sent,
-      failed,
-      successRate: total
-        ? Math.round((sent / total) * 100)
-        : 0,
+      total: campaign.totalRecipients,
+      sent: campaign.successCount,
+      failed: campaign.failureCount,
+      pending:
+        campaign.totalRecipients -
+        (campaign.successCount + campaign.failureCount),
+      progress: `${campaign.successCount + campaign.failureCount}/${campaign.totalRecipients}`,
     }
   }
 
@@ -337,51 +368,39 @@ export class CampaignsService {
     )
   }
 
-  // Dashboard 
+  /* ================= DASHBOARD ================= */
   async dashboardStats(userId: string) {
-  const total = await this.campaignModel.countDocuments({ userId })
+    const campaigns = await this.campaignModel.find({ userId })
 
-  const sent = await this.campaignModel.countDocuments({
-    userId,
-    status: "sent",
-  })
+    let success = 0
+    let failure = 0
 
-  const failed = await this.campaignModel.countDocuments({
-    userId,
-    status: "failed",
-  })
+    campaigns.forEach((c) => {
+      success += c.successCount || 0
+      failure += c.failureCount || 0
+    })
 
-  const pending = await this.campaignModel.countDocuments({
-    userId,
-    status: "pending",
-  })
-
-  const draft = await this.campaignModel.countDocuments({
-    userId,
-    status: "draft",
-  })
-
-  const emailStats = await this.campaignModel.aggregate([
-    { $match: { userId } },
-    {
-      $group: {
-        _id: null,
-        success: { $sum: "$successCount" },
-        failure: { $sum: "$failureCount" },
-      },
-    },
-  ])
-
-  return {
-    total,
-    status: {
-      sent,
-      failed,
-      pending,
-      draft,
-    },
-    emails: emailStats[0] || { success: 0, failure: 0 },
+    return {
+      totalCampaigns: campaigns.length,
+      emails: { success, failure },
+    }
   }
+
+  async updateCampaign(
+  campaignId: string,
+  userId: string,
+  data: Partial<Campaign>,
+) {
+  const result = await this.campaignModel.updateOne(
+    { _id: campaignId, userId },
+    data,
+  )
+
+  if (!result.modifiedCount) {
+    throw new BadRequestException("Campaign not updated")
+  }
+
+  return { message: "Campaign updated" }
 }
 
 }

@@ -10,11 +10,11 @@ import { UsersModule } from "src/users/users.module"
     UsersModule,
     MongooseModule.forFeature([
       { name: Campaign.name, schema: CampaignSchema },
-       { name: Unsubscribe.name, schema: UnsubscribeSchema },
+      { name: Unsubscribe.name, schema: UnsubscribeSchema },
     ]),
   ],
   controllers: [EmailController],
   providers: [EmailService],
-  exports: [EmailService], // 🔥 IMPORTANT LINE
+  exports: [EmailService],
 })
 export class EmailModule {}

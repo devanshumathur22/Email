@@ -1,30 +1,35 @@
 import { useState } from "react"
 
-export default function CampaignScheduleModal({ onSave, onClose }) {
-  const [rate, setRate] = useState(60)
+export default function CampaignScheduleModal({
+  campaign,
+  onClose,
+  onSave,
+}) {
   const [time, setTime] = useState("")
 
+  const submit = () => {
+    if (!time) return alert("Select date & time")
+    onSave({ time })
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-96">
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white w-[420px] rounded-xl p-6"
+      >
         <h2 className="text-lg font-semibold mb-4">
           Schedule Campaign
         </h2>
 
-        <label className="text-sm">Emails per minute</label>
-        <input
-          type="number"
-          value={rate}
-          onChange={(e) => setRate(e.target.value)}
-          className="w-full border rounded px-3 py-2 mb-4"
-        />
-
-        <label className="text-sm">Send at</label>
         <input
           type="datetime-local"
           value={time}
           onChange={(e) => setTime(e.target.value)}
-          className="w-full border rounded px-3 py-2 mb-4"
+          className="w-full border px-3 py-2 rounded mb-6"
         />
 
         <div className="flex justify-end gap-2">
@@ -34,11 +39,12 @@ export default function CampaignScheduleModal({ onSave, onClose }) {
           >
             Cancel
           </button>
+
           <button
-            onClick={() => onSave({ rate, time })}
+            onClick={submit}
             className="px-4 py-2 bg-indigo-600 text-white rounded"
           >
-            Save
+            Schedule
           </button>
         </div>
       </div>
