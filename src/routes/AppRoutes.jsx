@@ -11,6 +11,8 @@ import TemplateBuilder from "../pages/TemplateBuilder"
 import CampaignCreate from "../pages/CampaignCreate"
 import Queue from "../pages/Queue"
 import Groups from "../pages/Groups"
+import Register from "../pages/Register"
+import Profile from "../pages/Profile"
 
 export default function AppRoutes() {
   return (
@@ -34,6 +36,9 @@ export default function AppRoutes() {
       <Route path="/queue" element={<ProtectedRoute><Queue /></ProtectedRoute>} />
       <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="/register" element={<ProtectedRoute><Register /></ProtectedRoute>} />
+      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+
     </Routes>
   )
 }

@@ -1,39 +1,25 @@
 export const api = async (url, options = {}) => {
   const token = localStorage.getItem("token")
 
-  const res = await fetch(`http://localhost:8000${url}`, {
-    method: options.method || "GET",
-    body:
-      options.body instanceof FormData
-        ? options.body
-        : options.body
+  const res = await fetch(
+    `${import.meta.env.VITE_API_URL}${url}`,
+    {
+      method: options.method || "GET",
+      body: options.body
         ? JSON.stringify(options.body)
         : undefined,
-    headers:
-      options.body instanceof FormData
-        ? {
-            Authorization: token ? `Bearer ${token}` : "",
-          }
-        : {
-            "Content-Type": "application/json",
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-  })
+      headers: {
+        "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      credentials: "include", // 🔥 add this
+    }
+  )
 
   if (!res.ok) {
-    let message = "Server error"
-
-    try {
-      const data = await res.json()
-      message = data.message || message
-    } catch {
-      message = await res.text()
-    }
-
-    throw new Error(message)
+    const text = await res.text()
+    throw new Error(text)
   }
-
-  if (res.status === 204) return null
 
   return res.json()
 }

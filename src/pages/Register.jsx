@@ -1,9 +1,9 @@
 import { useState } from "react"
 import { useNavigate, Link } from "react-router-dom"
-import { api } from "../api"   // 👈 ADD THIS
 
-export default function Login() {
+export default function Register() {
   const navigate = useNavigate()
+  const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -15,18 +15,19 @@ export default function Login() {
     setLoading(true)
 
     try {
-      const data = await api("/auth/login", {
+      const res = await fetch("http://localhost:8000/auth/register", {
         method: "POST",
-        body: {
-          email,
-          password,
-        },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
       })
 
-      // 🔐 token save
+      const data = await res.json()
+
+      if (!res.ok) throw new Error(data.message || "Registration failed")
+
+      // optional: auto login after register
       localStorage.setItem("token", data.access_token)
 
-      // redirect
       navigate("/")
     } catch (err) {
       setError(err.message)
@@ -39,7 +40,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-slate-100">
       <div className="w-full max-w-md bg-white rounded-xl shadow p-8">
         <h1 className="text-2xl font-bold mb-6 text-center">
-          Email Sender Login
+          Create Account
         </h1>
 
         {error && (
@@ -49,6 +50,17 @@ export default function Login() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="text-sm font-medium">Name</label>
+            <input
+              type="text"
+              className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+
           <div>
             <label className="text-sm font-medium">Email</label>
             <input
@@ -76,17 +88,18 @@ export default function Login() {
             disabled={loading}
             className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition"
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "Creating account..." : "Create Account"}
           </button>
         </form>
 
+        {/* BACK TO LOGIN */}
         <div className="mt-6 text-center text-sm">
-          <span className="text-gray-600">New here?</span>{" "}
+          <span className="text-gray-600">Already have an account?</span>{" "}
           <Link
-            to="/register"
+            to="/login"
             className="text-blue-600 font-medium hover:underline"
           >
-            Create new account
+            Login
           </Link>
         </div>
       </div>
