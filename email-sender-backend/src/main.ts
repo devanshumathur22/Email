@@ -6,14 +6,20 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule)
 
   app.enableCors({
-    origin: [
-      "http://localhost:5173",          // local frontend
-      "https://email-ap8g.vercel.app", // 🔥 vercel frontend
-    ],
-    methods: "GET,POST,PATCH,DELETE,OPTIONS",
-    allowedHeaders: "Content-Type, Authorization",
-    credentials: true,
-  })
+  origin: [
+    "http://localhost:5173",
+
+    // OLD
+    // "https://email-ap8g.vercel.app",
+
+    // ✅ NEW – wildcard allow ALL vercel previews
+    /https:\/\/.*\.vercel\.app$/,
+  ],
+  methods: "GET,POST,PATCH,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type, Authorization",
+  credentials: true,
+})
+
 
   const PORT = process.env.PORT || 8000
   await app.listen(PORT)
