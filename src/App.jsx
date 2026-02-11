@@ -2,23 +2,26 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 import MainLayout from "./layouts/MainLayout"
 import AppRoutes from "./routes/AppRoutes"
 import Login from "./pages/Login"
+import ProtectedRoute from "./components/ProtectedRoute"
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 🔓 PUBLIC */}
+
+        {/* Public */}
         <Route path="/login" element={<Login />} />
 
-        {/* 🔐 PROTECTED */}
+        {/* Protected */}
         <Route
           path="/*"
           element={
-            <MainLayout>
-              <AppRoutes />
-            </MainLayout>
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
           }
         />
+
       </Routes>
     </BrowserRouter>
   )

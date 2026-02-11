@@ -1,7 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 
 export default function Topbar() {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem("token"); // token delete
+    navigate("/login"); // redirect to login
+  };
 
   return (
     <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 relative">
@@ -50,13 +58,24 @@ export default function Topbar() {
               </div>
 
               <div className="py-1 text-sm">
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-100">
+                <button
+                  onClick={() => navigate("/profile")}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-100"
+                >
                   Profile
                 </button>
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-100">
+
+                <button
+                  onClick={() => navigate("/settings")}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-100"
+                >
                   Settings
                 </button>
-                <button className="w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100">
+
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100"
+                >
                   Logout
                 </button>
               </div>
