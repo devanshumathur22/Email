@@ -17,9 +17,15 @@ async function bootstrap() {
   )
 
 app.enableCors({
-  origin: true,
+  origin: [
+    "https://email-ap8g.vercel.app",
+    "https://email-ap8g-git-main-devanshu-mathurs-projects.vercel.app"
+  ],
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
   credentials: true,
 })
+
 
 
 
