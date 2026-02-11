@@ -27,6 +27,14 @@ export const api = async (url, options = {}) => {
     const text = await res.text()
     throw new Error("Expected JSON, got:\n" + text)
   }
+  const BASE = import.meta.env.VITE_API_URL
+
+console.log("BASE:", BASE)
+
+if (!BASE) {
+  throw new Error("VITE_API_URL missing")
+}
+
 
   return res.json()
 }
