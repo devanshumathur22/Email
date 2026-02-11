@@ -9,6 +9,7 @@ export default function Topbar() {
   const handleLogout = () => {
     localStorage.removeItem("token"); // token delete
     navigate("/login"); // redirect to login
+     window.location.reload()   // 👈 important for clean reset
   };
 
   return (
