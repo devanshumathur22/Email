@@ -55,6 +55,7 @@ export default function Queue() {
   const [previewRow, setPreviewRow] = useState(null)
   const [selected, setSelected] = useState([])
   const [importMode, setImportMode] = useState("append")
+  const [file, setFile] = useState(null)
 
   const fileRef = useRef(null)
   const navigate = useNavigate()
@@ -66,8 +67,7 @@ export default function Queue() {
     try {
       const data = await api("/email-queue")
       setRows(Array.isArray(data) ? data : [])
-    } catch (e) {
-      console.error(e)
+    } catch {
       setRows([])
     }
   }
@@ -105,56 +105,51 @@ export default function Queue() {
 
   const hasInvalidSelection = selectedRows.some(
     (r) =>
-      normalize(r.status) === "SENT" ||
-      normalize(r.status) === "FAILED" ||
-      normalize(r.status) === "CONVERTED",
+      normalize(r.status) !== "DRAFT",
   )
 
   /* ================= ACTIONS ================= */
 
   const convertToCampaign = async () => {
-    if (!selected.length) {
-      alert("Select draft emails first")
-      return
-    }
+    if (!selected.length) return alert("Select draft emails")
 
-    if (hasInvalidSelection) {
-      alert("Only DRAFT emails can be converted")
-      return
-    }
+    if (hasInvalidSelection)
+      return alert("Only DRAFT emails allowed")
 
-    try {
-     await api("/campaigns/convert-to-campaign", {
-  method: "POST",
-  body: {
-    queueIds: selected,
-  },
-})
-
-
-      alert("Campaign created successfully 🚀")
-      setSelected([])
-      load()
-      navigate("/campaigns")
-    } catch (err) {
-      alert(err.message || "Conversion failed")
-    }
-  }
-
-  const uploadCSV = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const form = new FormData()
-    form.append("file", file)
-    form.append("mode", importMode)
-
-    await api("/email-queue/upload", {
+    await api("/campaigns/convert-to-campaign", {
       method: "POST",
-      body: form,
+      body: { queueIds: selected },
     })
 
-    e.target.value = ""
+    alert("Campaign created 🚀")
+    setSelected([])
+    load()
+    navigate("/campaigns")
+  }
+
+  /* ===== CSV UPLOAD ===== */
+  const handleUpload = async () => {
+    if (!file) {
+      fileRef.current.click()
+      return
+    }
+
+    const formData = new FormData()
+    formData.append("file", file)
+
+    await fetch(
+      `http://localhost:8000/email-queue/upload?mode=${importMode}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: formData,
+      },
+    )
+
+    setFile(null)
+    fileRef.current.value = ""
     load()
   }
 
@@ -170,7 +165,7 @@ export default function Queue() {
 
     await api("/email-queue/delete-many", {
       method: "POST",
-      body: JSON.stringify({ ids: selected }),
+      body: { ids: selected },
     })
 
     setSelected([])
@@ -180,7 +175,7 @@ export default function Queue() {
   const saveEdit = async (data) => {
     await api(`/email-queue/${editingRow._id}`, {
       method: "PATCH",
-      body: JSON.stringify(data),
+      body: data,
     })
     setEditingRow(null)
     load()
@@ -191,7 +186,7 @@ export default function Queue() {
     <div className="p-8 space-y-6">
       <h1 className="text-2xl font-semibold">Email Queue</h1>
 
-      {/* FILTER + SUMMARY */}
+      {/* SUMMARY */}
       <div className="flex gap-6 items-center text-sm">
         <div>📦 Total: <b>{rows.length}</b></div>
         <div>📝 Draft: <b>{rows.filter(r => normalize(r.status) === "DRAFT").length}</b></div>
@@ -212,13 +207,34 @@ export default function Queue() {
 
       {/* ACTION BAR */}
       <div className="flex gap-3 flex-wrap">
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv"
-          onChange={uploadCSV}
-          className="hidden"
-        />
+       <input
+  ref={fileRef}
+  type="file"
+  accept=".csv"
+  className="hidden"
+  onChange={async (e) => {
+    const selectedFile = e.target.files[0]
+    if (!selectedFile) return
+
+    const formData = new FormData()
+    formData.append("file", selectedFile)
+
+    await fetch(
+      `http://localhost:8000/email-queue/upload?mode=${importMode}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: formData,
+      },
+    )
+
+    e.target.value = ""   // 🔥 important reset
+    load()
+  }}
+/>
+
 
         <select
           value={importMode}
@@ -229,10 +245,7 @@ export default function Queue() {
           <option value="replace">Replace All</option>
         </select>
 
-        <Button
-          text="Upload CSV"
-          onClick={() => fileRef.current.click()}
-        />
+        <Button text="Upload CSV" onClick={handleUpload} />
 
         {selected.length > 0 && (
           <>
@@ -288,7 +301,6 @@ export default function Queue() {
         </table>
       </div>
 
-      {/* MODALS */}
       {editingRow && (
         <EditQueueModal
           item={editingRow}

@@ -130,4 +130,6 @@ export class EmailQueueController {
   async deleteAll(@Req() req) {
     return this.queueService.deleteAll(req.user.id)
   }
+
+  
 }

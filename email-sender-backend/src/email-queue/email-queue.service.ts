@@ -154,26 +154,26 @@ export class EmailQueueService {
   }
 
   /* ================= DELETE ================= */
-  async deleteOne(userId: string, id: string) {
-    return this.model.deleteOne({
-      _id: id,
-      userId,
-      status: "draft",
-    })
-  }
+async deleteMany(userId: string, ids: string[]) {
+  return this.model.deleteMany({
+    _id: { $in: ids },
+    userId,
+  })
+}
 
-  async deleteMany(userId: string, ids: string[]) {
-    return this.model.deleteMany({
-      _id: { $in: ids },
-      userId,
-      status: "draft",
-    })
-  }
+async deleteOne(userId: string, id: string) {
+  return this.model.deleteOne({
+    _id: id,
+    userId,
+  })
+}
 
-  async deleteAll(userId: string) {
-    return this.model.deleteMany({
-      userId,
-      status: "draft",
-    })
-  }
+
+async deleteAll(userId: string) {
+  return this.model.deleteMany({
+    userId,
+    status: { $ne: "converted" },
+  })
+}
+
 }

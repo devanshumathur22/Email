@@ -9,6 +9,7 @@ export enum CampaignStatus {
   SENDING = "sending",
   SENT = "sent",
   FAILED = "failed",
+  SCHEDULED = "scheduled", 
 }
 
 @Schema({

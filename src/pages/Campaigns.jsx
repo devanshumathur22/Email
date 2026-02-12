@@ -87,11 +87,12 @@ export default function Campaigns() {
   const attachAndSend = async ({ contactIds, groupIds }) => {
     await api(`/campaigns/${selectedCampaign}/recipients/save`, {
       method: "POST",
-      body: JSON.stringify({
-        contactIds,
-        groupIds,
-        excludeContactIds: [],
-      }),
+     body: {
+  contactIds,
+  groupIds,
+  excludeContactIds: [],
+},
+
     })
 
     await api(`/campaigns/${selectedCampaign}/send-now`, {
@@ -149,16 +150,18 @@ export default function Campaigns() {
         />
 
         <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2 border rounded"
-        >
-          <option value="all">All</option>
-          <option value="draft">Draft</option>
-          <option value="sending">Sending</option>
-          <option value="sent">Sent</option>
-          <option value="failed">Failed</option>
-        </select>
+  value={statusFilter}
+  onChange={(e) => setStatusFilter(e.target.value)}
+  className="px-4 py-2 border rounded"
+>
+  <option value="all">All</option>
+  <option value="draft">Draft</option>
+  <option value="pending">Scheduled</option>
+  <option value="sending">Sending</option>
+  <option value="sent">Sent</option>
+  <option value="failed">Failed</option>
+</select>
+
       </div>
 
       {/* TABLE */}
@@ -188,10 +191,11 @@ export default function Campaigns() {
                 onPreview={() => setPreviewCampaign(c)}
                 onAnalytics={() => setAnalyticsCampaign(c)}
                 onSchedule={
-                  c.status === "draft"
-                    ? () => setScheduleCampaign(c)
-                    : undefined
-                }
+  c.status === "draft" || c.status === "pending"
+    ? () => setScheduleCampaign(c)
+    : undefined
+}
+
               />
             ))}
           </tbody>

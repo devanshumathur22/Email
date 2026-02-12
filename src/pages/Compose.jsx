@@ -67,30 +67,44 @@ export default function Compose() {
 
   /* ================= SEND NOW ================= */
   const sendNow = async () => {
-    if (!validate()) return
-    try {
-      setLoading(true)
+  if (!validate()) return
 
-      await api("/email/send", {
-        method: "POST",
-        body: {
-          email: to,
-          cc,
-          bcc,
-          subject,
-          html: body,
-          footer,
-        },
-      })
+  try {
+    setLoading(true)
 
-      toast("Message sent")
-      closeCompose()
-    } catch {
-      toast("Send failed")
-    } finally {
-      setLoading(false)
-    }
+    // 1️⃣ create campaign
+    const { id } = await api("/campaigns", {
+      method: "POST",
+      body: {
+        subject,
+        html: body,
+        footer,
+      },
+    })
+
+    // 2️⃣ add recipient to campaign
+    await api(`/campaigns/${id}/recipients`, {
+      method: "POST",
+      body: {
+        emails: [to], // 🔥 IMPORTANT
+      },
+    })
+
+    // 3️⃣ send now
+    await api(`/campaigns/${id}/send-now`, {
+      method: "POST",
+    })
+
+    toast("Message sent")
+    closeCompose()
+  } catch (err) {
+    console.error(err)
+    toast("Send failed")
+  } finally {
+    setLoading(false)
   }
+}
+
 
   /* ================= SAVE DRAFT ================= */
   const saveDraft = async () => {
@@ -119,32 +133,47 @@ export default function Compose() {
   }
 
   /* ================= SCHEDULE ================= */
-  const scheduleMail = async (scheduledAt) => {
-    if (!validate()) return
-    try {
-      setLoading(true)
+ const scheduleMail = async (scheduledAt) => {
+  if (!validate()) return
 
-      await api("/email/draft", {
-        method: "POST",
-        body: {
-          email: to,
-          cc,
-          bcc,
-          subject,
-          html: body,
-          footer,
-          scheduledAt,
-        },
-      })
+  try {
+    setLoading(true)
 
-      toast("Message scheduled")
-      closeCompose()
-    } catch {
-      toast("Schedule failed")
-    } finally {
-      setLoading(false)
-    }
+    const { id } = await api("/campaigns", {
+      method: "POST",
+      body: {
+        subject,
+        html: body,
+        footer,
+      },
+    })
+
+    // add recipient
+    await api(`/campaigns/${id}/recipients`, {
+      method: "POST",
+      body: {
+        emails: [to],
+      },
+    })
+
+    // schedule
+    await api(`/campaigns/${id}/schedule`, {
+      method: "POST",
+      body: {
+        scheduledAt: new Date(scheduledAt).toISOString(),
+      },
+    })
+
+    toast("Message scheduled")
+    closeCompose()
+  } catch (err) {
+    console.error(err)
+    toast("Schedule failed")
+  } finally {
+    setLoading(false)
   }
+}
+
 
   /* ================= UI ================= */
   return (

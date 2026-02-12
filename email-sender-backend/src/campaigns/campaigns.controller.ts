@@ -45,6 +45,47 @@ export class CampaignsController {
 
   /* ================= TRACKING ================= */
 
+  /* ================= ADD RECIPIENTS ================= */
+
+@Post(":id/recipients")
+async addRecipients(
+  @Req() req,
+  @Param("id") id: string,
+  @Body("emails") emails: string[],
+) {
+  if (!Array.isArray(emails) || !emails.length) {
+    throw new BadRequestException("No recipients provided")
+  }
+
+  // Ensure campaign belongs to user
+  const campaign = await this.campaignModel.findOne({
+    _id: id,
+    userId: req.user.id,
+  })
+
+  if (!campaign) {
+    throw new BadRequestException("Campaign not found")
+  }
+
+  // Prepare recipient docs
+  const docs = emails.map(email => ({
+    campaignId: id,
+    email: email.trim().toLowerCase(),
+    status: "pending",
+  }))
+
+  await this.recipientModel.insertMany(docs)
+
+  // Update recipient count
+  await this.campaignModel.updateOne(
+    { _id: id },
+    { totalRecipients: docs.length },
+  )
+
+  return { message: "Recipients added" }
+}
+// 
+
   @Get("email/open/:campaignId")
   async trackOpen(
     @Param("campaignId") campaignId: string,

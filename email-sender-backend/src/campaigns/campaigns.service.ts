@@ -60,23 +60,37 @@ export class CampaignsService {
 
   /* ================= ATTACH RECIPIENTS ================= */
   async attachRecipients(campaignId: string, emails: string[]) {
-    if (!emails.length) return
-
-    await this.recipientModel.deleteMany({ campaignId })
-
-    await this.recipientModel.insertMany(
-      emails.map((email) => ({
-        campaignId,
-        email,
-        status: "pending",
-      })),
-    )
-
-    await this.campaignModel.updateOne(
-      { _id: campaignId },
-      { totalRecipients: emails.length },
-    )
+  if (!Array.isArray(emails) || !emails.length) {
+    return
   }
+
+  // 🔒 normalize + clean emails
+  const cleaned = emails
+    .map(e => e?.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (!cleaned.length) return
+
+  // 🔥 insert safely (skip duplicates)
+  await this.recipientModel.insertMany(
+    cleaned.map(email => ({
+      campaignId,
+      email,
+      status: "pending",
+    })),
+    { ordered: false }, // prevents crash on duplicate
+  )
+
+  // 🔄 update total count from DB (accurate count)
+  const total = await this.recipientModel.countDocuments({
+    campaignId,
+  })
+
+  await this.campaignModel.updateOne(
+    { _id: campaignId },
+    { totalRecipients: total },
+  )
+}
 
   /* ================= QUEUE → CAMPAIGN ================= */
   async convertToCampaign(userId: string, queueIds: string[]) {
@@ -156,14 +170,13 @@ export class CampaignsService {
   }
 
   /* ================= PROCESS EMAIL QUEUE ================= */
-  async processEmailQueue() {
-  // 🔒 pick small batch
+ async processEmailQueue() {
   const jobs = await this.emailQueueModel
     .find({ status: "queued" })
     .limit(10)
 
   for (const job of jobs) {
-    // 🔐 atomic soft-lock (prevents double send)
+    // 🔐 atomic lock
     const locked = await this.emailQueueModel.updateOne(
       { _id: job._id, status: "queued" },
       { $set: { status: "processing" } },
@@ -172,7 +185,28 @@ export class CampaignsService {
     if (locked.modifiedCount === 0) continue
 
     const campaign = await this.campaignModel.findById(job.campaignId)
-    if (!campaign || campaign.paused) continue
+
+    // 🚨 If campaign missing
+    if (!campaign) {
+      await this.emailQueueModel.updateOne(
+        { _id: job._id },
+        {
+          status: "failed",
+          lastError: "Campaign not found",
+          failedAt: new Date(),
+        },
+      )
+      continue
+    }
+
+    // ⏸ If paused → revert back to queued
+    if (campaign.paused) {
+      await this.emailQueueModel.updateOne(
+        { _id: job._id },
+        { status: "queued" },
+      )
+      continue
+    }
 
     try {
       await this.emailService.sendMail(
@@ -208,14 +242,14 @@ export class CampaignsService {
           {
             status: "failed",
             failedAt: new Date(),
-            lastError: err?.message,
+            lastError: err?.message || "Unknown error",
           },
         ),
         this.recipientModel.updateOne(
           { campaignId: job.campaignId, email: job.email },
           {
             status: "failed",
-            failedReason: err?.message,
+            failedReason: err?.message || "Unknown error",
           },
         ),
         this.campaignModel.updateOne(
@@ -223,6 +257,29 @@ export class CampaignsService {
           { $inc: { failureCount: 1 } },
         ),
       ])
+    }
+  }
+
+  // 🔥 Finalize campaigns automatically
+  const sendingCampaigns = await this.campaignModel.find({
+    status: "sending",
+  })
+
+  for (const c of sendingCampaigns) {
+    const remaining = await this.emailQueueModel.countDocuments({
+      campaignId: c._id.toString(),
+      status: { $in: ["queued", "processing"] },
+    })
+
+    if (remaining === 0) {
+      await this.campaignModel.updateOne(
+        { _id: c._id },
+        {
+          status: "sent",
+          sentAt: new Date(),
+          paused: false,
+        },
+      )
     }
   }
 

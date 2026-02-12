@@ -45,7 +45,7 @@ smtp?: {
   user: string
   pass: string
   secure: boolean
-  verified: boolean
+  verified: { type: Boolean, default: false }
   addedAt: Date
 }
 
