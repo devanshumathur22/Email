@@ -1,54 +1,23 @@
-import { Outlet, NavLink } from "react-router-dom";
-import { Bell, User } from "lucide-react"; // agar icons use kar raha hai
+import { Outlet } from "react-router-dom";
+import Sidebar from "../components/Sidebar"; // ← yeh line add kar (path sahi kar le agar alag folder mein hai)
 
 export default function MainLayout() {
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col">
-        <div className="p-6">
-          <h2 className="text-xl font-bold">Email Sender</h2>
-          <p className="text-sm text-gray-400">Campaign Manager</p>
-        </div>
+      {/* Sidebar ko component se laao – duplicate mat likho */}
+      <Sidebar />
 
-        <nav className="flex-1 px-4 space-y-1">
-          <NavLink
-            to="/"
-            className={({ isActive }) =>
-              `flex items-center px-4 py-3 rounded-lg ${isActive ? "bg-slate-700" : "hover:bg-slate-800"}`
-            }
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/compose"
-            className={({ isActive }) =>
-              `flex items-center px-4 py-3 rounded-lg ${isActive ? "bg-slate-700" : "hover:bg-slate-800"}`
-            }
-          >
-            Compose
-          </NavLink>
-          <NavLink
-            to="/campaigns"
-            className={({ isActive }) =>
-              `flex items-center px-4 py-3 rounded-lg ${isActive ? "bg-slate-700" : "hover:bg-slate-800"}`
-            }
-          >
-            Campaigns
-          </NavLink>
-          {/* Baaki links: Templates, Queue, Contacts, Groups, Settings */}
-        </nav>
-      </aside>
-
-      {/* Right side */}
+      {/* Right side – header + content */}
       <div className="flex-1 flex flex-col">
         <header className="bg-white shadow-sm p-4 flex justify-between items-center">
-          <h1 className="text-xl font-semibold">Campaign Manager</h1>
+          <h1 className="text-xl font-semibold">Email Sender</h1> {/* ← yeh change kar diya, Campaign Manager hata diya */}
+          
           <div className="flex items-center gap-4">
-            <button className="relative">
-              <Bell size={20} />
-              {/* Notification badge agar chahiye */}
-            </button>
+            {/* Agar lucide-react install hai to */}
+            {/* <Bell size={20} /> */}
+            {/* Warna simple text ya emoji */}
+            <span>🔔</span>
+
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium">
                 D
